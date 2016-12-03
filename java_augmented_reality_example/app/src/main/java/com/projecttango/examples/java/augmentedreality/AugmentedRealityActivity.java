@@ -16,6 +16,16 @@
 
 package com.projecttango.examples.java.augmentedreality;
 
+import android.app.Activity;
+import android.hardware.Camera;
+import android.hardware.display.DisplayManager;
+import android.opengl.GLSurfaceView;
+import android.opengl.Matrix;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.Display;
+import android.view.Surface;
+
 import com.google.atap.tangoservice.Tango;
 import com.google.atap.tangoservice.Tango.OnTangoUpdateListener;
 import com.google.atap.tangoservice.TangoCameraIntrinsics;
@@ -28,24 +38,13 @@ import com.google.atap.tangoservice.TangoOutOfDateException;
 import com.google.atap.tangoservice.TangoPointCloudData;
 import com.google.atap.tangoservice.TangoPoseData;
 import com.google.atap.tangoservice.TangoXyzIjData;
-
-import android.app.Activity;
-import android.hardware.Camera;
-import android.hardware.display.DisplayManager;
-import android.opengl.GLSurfaceView;
-import android.opengl.Matrix;
-import android.os.Bundle;
-import android.util.Log;
-import android.view.Display;
-import android.view.Surface;
+import com.projecttango.tangosupport.TangoSupport;
 
 import org.rajawali3d.scene.ASceneFrameCallback;
 import org.rajawali3d.surface.RajawaliSurfaceView;
 
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import com.projecttango.tangosupport.TangoSupport;
 
 /**
  * This is a simple example that shows how to use the Tango APIs to create an augmented reality (AR)
@@ -226,6 +225,7 @@ public class AugmentedRealityActivity extends Activity {
             @Override
             public void onPointCloudAvailable(TangoPointCloudData pointCloud) {
                 // We are not using onPointCloudAvailable for this app.
+                Log.d(TAG, "Points: " + pointCloud.numPoints);
             }
 
             @Override

@@ -15,31 +15,29 @@
  */
 package com.projecttango.examples.java.augmentedreality;
 
-import com.google.atap.tangoservice.TangoPoseData;
-
 import android.content.Context;
-
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.animation.LinearInterpolator;
 
+import com.google.atap.tangoservice.TangoPoseData;
+
 import org.rajawali3d.Object3D;
 import org.rajawali3d.animation.Animation;
 import org.rajawali3d.animation.Animation3D;
-import org.rajawali3d.animation.EllipticalOrbitAnimation3D;
 import org.rajawali3d.animation.RotateOnAxisAnimation;
 import org.rajawali3d.lights.DirectionalLight;
+import org.rajawali3d.loader.LoaderOBJ;
+import org.rajawali3d.loader.ParsingException;
 import org.rajawali3d.materials.Material;
 import org.rajawali3d.materials.methods.DiffuseMethod;
 import org.rajawali3d.materials.textures.ATexture;
 import org.rajawali3d.materials.textures.StreamingTexture;
-import org.rajawali3d.materials.textures.Texture;
 import org.rajawali3d.math.Matrix4;
 import org.rajawali3d.math.Quaternion;
 import org.rajawali3d.math.vector.Vector3;
 import org.rajawali3d.primitives.ScreenQuad;
-import org.rajawali3d.primitives.Sphere;
 import org.rajawali3d.renderer.RajawaliRenderer;
 
 import javax.microedition.khronos.opengles.GL10;
@@ -100,66 +98,31 @@ public class AugmentedRealityRenderer extends RajawaliRenderer {
         light.setPosition(3, 2, 4);
         getCurrentScene().addLight(light);
 
-        // Create sphere with earth texture and place it in space 3m forward from the origin.
-        Material earthMaterial = new Material();
+        Material objMaterial = new Material();
+        objMaterial.enableLighting(true);
+        objMaterial.setDiffuseMethod(new DiffuseMethod.Lambert());
+
+        Object3D loadedObj;
         try {
-            Texture t = new Texture("earth", R.drawable.earth);
-            earthMaterial.addTexture(t);
-        } catch (ATexture.TextureException e) {
-            Log.e(TAG, "Exception generating earth texture", e);
+            LoaderOBJ objParser = new LoaderOBJ(mContext.getResources(), mTextureManager, R.raw.monkey);
+            objParser.parse();
+            loadedObj = objParser.getParsedObject();
+            loadedObj.setScale(2f);
+            loadedObj.setMaterial(objMaterial);
+            loadedObj.setColor(mContext.getResources().getColor(R.color.brown));
+            loadedObj.setPosition(0, 0, -10);
+            getCurrentScene().addChild(loadedObj);
+
+            Animation3D objAnim = new RotateOnAxisAnimation(Vector3.Axis.Y, 360);
+            objAnim.setInterpolator(new LinearInterpolator());
+            objAnim.setDurationMilliseconds(60000);
+            objAnim.setRepeatMode(Animation.RepeatMode.INFINITE);
+            objAnim.setTransformable3D(loadedObj);
+            getCurrentScene().registerAnimation(objAnim);
+            objAnim.play();
+        } catch(ParsingException e) {
+            e.printStackTrace();
         }
-        earthMaterial.setColorInfluence(0);
-        earthMaterial.enableLighting(true);
-        earthMaterial.setDiffuseMethod(new DiffuseMethod.Lambert());
-        Object3D earth = new Sphere(0.4f, 20, 20);
-        earth.setMaterial(earthMaterial);
-        earth.setPosition(0, 0, -3);
-        getCurrentScene().addChild(earth);
-
-        // Rotate around its Y axis
-        Animation3D animEarth = new RotateOnAxisAnimation(Vector3.Axis.Y, 0, -360);
-        animEarth.setInterpolator(new LinearInterpolator());
-        animEarth.setDurationMilliseconds(60000);
-        animEarth.setRepeatMode(Animation.RepeatMode.INFINITE);
-        animEarth.setTransformable3D(earth);
-        getCurrentScene().registerAnimation(animEarth);
-        animEarth.play();
-
-        // Create sphere with moon texture.
-        Material moonMaterial = new Material();
-        try {
-            Texture t = new Texture("moon", R.drawable.moon);
-            moonMaterial.addTexture(t);
-        } catch (ATexture.TextureException e) {
-            Log.e(TAG, "Exception generating moon texture", e);
-        }
-        moonMaterial.setColorInfluence(0);
-        moonMaterial.enableLighting(true);
-        moonMaterial.setDiffuseMethod(new DiffuseMethod.Lambert());
-        Object3D moon = new Sphere(0.1f, 20, 20);
-        moon.setMaterial(moonMaterial);
-        moon.setPosition(0, 0, -1);
-        getCurrentScene().addChild(moon);
-
-        // Rotate the moon around its Y axis
-        Animation3D animMoon = new RotateOnAxisAnimation(Vector3.Axis.Y, 0, -360);
-        animMoon.setInterpolator(new LinearInterpolator());
-        animMoon.setDurationMilliseconds(60000);
-        animMoon.setRepeatMode(Animation.RepeatMode.INFINITE);
-        animMoon.setTransformable3D(moon);
-        getCurrentScene().registerAnimation(animMoon);
-        animMoon.play();
-
-        // Make the moon orbit around the earth, the first two parameters are the focal point and
-        // periapsis of the orbit.
-        Animation3D translationMoon =  new EllipticalOrbitAnimation3D(new Vector3(0, 0, -5),
-                new Vector3(0, 0, -1), Vector3.getAxisVector(Vector3.Axis.Y), 0,
-                360, EllipticalOrbitAnimation3D.OrbitDirection.COUNTERCLOCKWISE);
-        translationMoon.setDurationMilliseconds(60000);
-        translationMoon.setRepeatMode(Animation.RepeatMode.INFINITE);
-        translationMoon.setTransformable3D(moon);
-        getCurrentScene().registerAnimation(translationMoon);
-        translationMoon.play();
     }
 
     /**
