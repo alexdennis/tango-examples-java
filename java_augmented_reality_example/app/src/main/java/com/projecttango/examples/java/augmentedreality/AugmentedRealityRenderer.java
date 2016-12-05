@@ -115,7 +115,7 @@ public class AugmentedRealityRenderer extends RajawaliRenderer {
 
             Animation3D objAnim = new RotateOnAxisAnimation(Vector3.Axis.Y, 360);
             objAnim.setInterpolator(new LinearInterpolator());
-            objAnim.setDurationMilliseconds(60000);
+            objAnim.setDurationMilliseconds(6000);
             objAnim.setRepeatMode(Animation.RepeatMode.INFINITE);
             objAnim.setTransformable3D(loadedObj);
             getCurrentScene().registerAnimation(objAnim);
