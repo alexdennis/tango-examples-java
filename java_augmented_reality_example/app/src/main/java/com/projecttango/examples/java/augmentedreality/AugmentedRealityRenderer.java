@@ -38,7 +38,7 @@ import org.rajawali3d.math.Matrix4;
 import org.rajawali3d.math.Quaternion;
 import org.rajawali3d.math.vector.Vector3;
 import org.rajawali3d.primitives.ScreenQuad;
-import org.rajawali3d.renderer.RajawaliRenderer;
+import org.rajawali3d.renderer.Renderer;
 
 import javax.microedition.khronos.opengles.GL10;
 
@@ -48,13 +48,13 @@ import javax.microedition.khronos.opengles.GL10;
  * rendered, and a sphere with the texture of the earth floating ahead of the start position of
  * the Tango device.
  */
-public class AugmentedRealityRenderer extends RajawaliRenderer {
+public class AugmentedRealityRenderer extends Renderer {
     private static final String TAG = AugmentedRealityRenderer.class.getSimpleName();
 
-    private float[] textureCoords0 = new float[]{0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 1.0F};
-    private float[] textureCoords270 = new float[]{0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 1.0F};
-    private float[] textureCoords180 = new float[]{1.0F, 1.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F};
-    private float[] textureCoords90  = new float[]{1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+    private float[] textureCoords0 = new float[]{0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
+    private float[] textureCoords270 = new float[]{1.0F, 1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 0.0F};
+    private float[] textureCoords180 = new float[]{1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+    private float[] textureCoords90 = new float[]{0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F};
 
     // Rajawali texture used to render the Tango color camera.
     private ATexture mTangoCameraTexture;
@@ -128,26 +128,28 @@ public class AugmentedRealityRenderer extends RajawaliRenderer {
     /**
      * Update background texture's UV coordinates when device orientation is changed. i.e change
      * between landscape and portrait mode.
+     * This must be run in the OpenGL thread.
      */
-    public void updateColorCameraTextureUv(int rotation){
+    public void updateColorCameraTextureUvGlThread(int rotation) {
         if (mBackgroundQuad == null) {
             mBackgroundQuad = new ScreenQuad();
         }
 
         switch (rotation) {
             case Surface.ROTATION_90:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords90);
+                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords90, true);
                 break;
             case Surface.ROTATION_180:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords180);
+                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords180, true);
                 break;
             case Surface.ROTATION_270:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords270);
+                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords270, true);
                 break;
             default:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords0);
+                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords0, true);
                 break;
         }
+        mBackgroundQuad.getGeometry().reload();
     }
 
     /**
