@@ -3,7 +3,7 @@
     xmlns:surfaceview="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context="com.projecttango.experiments.floorplan.FloorplanActivity">
+    tools:context="com.projecttango.examples.java.floorplan.FloorplanActivity">
 
     <org.rajawali3d.view.SurfaceView
         android:id="@+id/ar_view"
