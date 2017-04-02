@@ -42,19 +42,18 @@ import org.rajawali3d.renderer.Renderer;
 
 import javax.microedition.khronos.opengles.GL10;
 
+import com.projecttango.tangosupport.TangoSupport;
+
 /**
  * Renderer that implements a basic augmented reality scene using Rajawali.
  * It creates a scene with a background quad taking the whole screen, where the color camera is
- * rendered, and a sphere with the texture of the earth floating ahead of the start position of
+ * rendered and a sphere with the texture of the earth floats ahead of the start position of
  * the Tango device.
  */
 public class AugmentedRealityRenderer extends Renderer {
     private static final String TAG = AugmentedRealityRenderer.class.getSimpleName();
 
     private float[] textureCoords0 = new float[]{0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
-    private float[] textureCoords270 = new float[]{1.0F, 1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 0.0F};
-    private float[] textureCoords180 = new float[]{1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
-    private float[] textureCoords90 = new float[]{0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F};
 
     // Rajawali texture used to render the Tango color camera.
     private ATexture mTangoCameraTexture;
@@ -80,7 +79,7 @@ public class AugmentedRealityRenderer extends Renderer {
             mBackgroundQuad.getGeometry().setTextureCoords(textureCoords0);
         }
         // We need to use Rajawali's {@code StreamingTexture} since it sets up the texture
-        // for GL_TEXTURE_EXTERNAL_OES rendering
+        // for GL_TEXTURE_EXTERNAL_OES rendering.
         mTangoCameraTexture =
                 new StreamingTexture("camera", (StreamingTexture.ISurfaceListener) null);
         try {
@@ -126,8 +125,8 @@ public class AugmentedRealityRenderer extends Renderer {
     }
 
     /**
-     * Update background texture's UV coordinates when device orientation is changed. i.e change
-     * between landscape and portrait mode.
+     * Update background texture's UV coordinates when device orientation is changed (i.e., change
+     * between landscape and portrait mode).
      * This must be run in the OpenGL thread.
      */
     public void updateColorCameraTextureUvGlThread(int rotation) {
@@ -135,35 +134,24 @@ public class AugmentedRealityRenderer extends Renderer {
             mBackgroundQuad = new ScreenQuad();
         }
 
-        switch (rotation) {
-            case Surface.ROTATION_90:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords90, true);
-                break;
-            case Surface.ROTATION_180:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords180, true);
-                break;
-            case Surface.ROTATION_270:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords270, true);
-                break;
-            default:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords0, true);
-                break;
-        }
+        float[] textureCoords =
+                TangoSupport.getVideoOverlayUVBasedOnDisplayRotation(textureCoords0, rotation);
+        mBackgroundQuad.getGeometry().setTextureCoords(textureCoords, true);
         mBackgroundQuad.getGeometry().reload();
     }
 
     /**
      * Update the scene camera based on the provided pose in Tango start of service frame.
-     * The camera pose should match the pose of the camera color at the time the last rendered RGB
-     * frame, which can be retrieved with this.getTimestamp();
+     * The camera pose should match the pose of the camera color at the time of the last rendered
+     * RGB frame, which can be retrieved with this.getTimestamp();
      * <p/>
-     * NOTE: This must be called from the OpenGL render thread - it is not thread safe.
+     * NOTE: This must be called from the OpenGL render thread; it is not thread-safe.
      */
     public void updateRenderCameraPose(TangoPoseData cameraPose) {
         float[] rotation = cameraPose.getRotationAsFloats();
         float[] translation = cameraPose.getTranslationAsFloats();
         Quaternion quaternion = new Quaternion(rotation[3], rotation[0], rotation[1], rotation[2]);
-        // Conjugating the Quaternion is need because Rajawali uses left handed convention for
+        // Conjugating the Quaternion is needed because Rajawali uses left-handed convention for
         // quaternions.
         getCurrentCamera().setRotation(quaternion.conjugate());
         getCurrentCamera().setPosition(translation[0], translation[1], translation[2]);
@@ -172,7 +160,7 @@ public class AugmentedRealityRenderer extends Renderer {
     /**
      * It returns the ID currently assigned to the texture where the Tango color camera contents
      * should be rendered.
-     * NOTE: This must be called from the OpenGL render thread - it is not thread safe.
+     * NOTE: This must be called from the OpenGL render thread; it is not thread-safe.
      */
     public int getTextureId() {
         return mTangoCameraTexture == null ? -1 : mTangoCameraTexture.getTextureId();

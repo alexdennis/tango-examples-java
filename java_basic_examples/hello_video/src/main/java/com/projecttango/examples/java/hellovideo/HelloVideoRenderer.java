@@ -19,7 +19,6 @@ import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.util.Log;
-import android.view.Surface;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -28,6 +27,8 @@ import java.nio.ShortBuffer;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
+
+import com.projecttango.tangosupport.TangoSupport;
 
 /**
  * A simple OpenGL renderer that renders the Tango RGB camera texture on a full-screen background.
@@ -55,12 +56,6 @@ public class HelloVideoRenderer implements GLSurfaceView.Renderer {
 
     private final float[] textureCoords0 =
             new float[]{1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f};
-    private final float[] textureCoords270 =
-            new float[]{1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
-    private final float[] textureCoords180 =
-            new float[]{0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F};
-    private final float[] textureCoords90 =
-            new float[]{0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
 
     /**
      * A small callback to allow the caller to introduce application-specific code to be executed
@@ -102,27 +97,16 @@ public class HelloVideoRenderer implements GLSurfaceView.Renderer {
     }
 
     public void updateColorCameraTextureUv(int rotation){
-        switch (rotation) {
-            case Surface.ROTATION_90:
-                setTextureCoords(textureCoords90);
-                break;
-            case Surface.ROTATION_180:
-                setTextureCoords(textureCoords180);
-                break;
-            case Surface.ROTATION_270:
-                setTextureCoords(textureCoords270);
-                break;
-            default:
-                setTextureCoords(textureCoords0);
-                break;
-        }
+        float[] textureCoords =
+                TangoSupport.getVideoOverlayUVBasedOnDisplayRotation(textureCoords0, rotation);
+        setTextureCoords(textureCoords);
     }
 
     private void setTextureCoords(float[] textureCoords) {
         mTexCoord.put(textureCoords);
         mTexCoord.position(0);
         if (mVbos != null) {
-            // Bind to texcoord buffer
+            // Bind to texcoord buffer.
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, mVbos[1]);
             // Populate it.
             GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, 4 * 2 * Float
@@ -147,12 +131,12 @@ public class HelloVideoRenderer implements GLSurfaceView.Renderer {
     public void onDrawFrame(GL10 gl10) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
-        // Call application-specific code that needs to run on the OpenGL thread
+        // Call application-specific code that needs to run on the OpenGL thread.
         mRenderCallback.preRender();
 
         GLES20.glUseProgram(mProgram);
 
-        // Don't write depth buffer because we want to draw the camera as background
+        // Don't write depth buffer because we want to draw the camera as background.
         GLES20.glDepthMask(false);
 
         int ph = GLES20.glGetAttribLocation(mProgram, "vPosition");
@@ -178,7 +162,7 @@ public class HelloVideoRenderer implements GLSurfaceView.Renderer {
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
         GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
 
-        // Enable depth write again for any additional rendering on top of the camera surface
+        // Enable depth write again for any additional rendering on top of the camera surface.
         GLES20.glDepthMask(true);
     }
 
@@ -197,29 +181,29 @@ public class HelloVideoRenderer implements GLSurfaceView.Renderer {
     }
 
     /**
-     * Creates and populeates vertex buffer objects for rendering the camera.
+     * Creates and populates vertex buffer objects for rendering the camera.
      */
     private void createCameraVbos() {
         mVbos = new int[3];
-        // Generate 3 buffers. Vertex buffer, texture buffer and index buffer.
+        // Generate three buffers: vertex buffer, texture buffer and index buffer.
         GLES20.glGenBuffers(3, mVbos, 0);
-        // Bind to vertex buffer
+        // Bind to vertex buffer.
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, mVbos[0]);
         // Populate it.
         GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, mVertex.capacity() * Float.SIZE / 8,
                 mVertex, GLES20.GL_STATIC_DRAW); // 4 2D vertex of floats.
 
-        // Bind to texture buffer
+        // Bind to texture buffer.
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, mVbos[1]);
         // Populate it.
         GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, mTexCoord.capacity() * Float.SIZE / 8,
                 mTexCoord, GLES20.GL_STATIC_DRAW); // 4 2D texture coords of floats.
 
-        // Bind to indices buffer
+        // Bind to indices buffer.
         GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, mVbos[2]);
         // Populate it.
         GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, mIndices.capacity() * Short.SIZE / 8,
-                mIndices, GLES20.GL_STATIC_DRAW); // 4 short indices
+                mIndices, GLES20.GL_STATIC_DRAW); // 4 short indices.
 
         // Unbind buffer.
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);

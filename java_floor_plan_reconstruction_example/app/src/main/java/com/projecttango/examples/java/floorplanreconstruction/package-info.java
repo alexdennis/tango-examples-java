@@ -14,6 +14,6 @@
  * limitations under the License.
  */
 /**
- * A sample showing how to build a 2d floor plan using Tango.
+ * A sample showing how to build a mesh using Tango.
  */
-package com.projecttango.examples.java.floorplan;
+package com.projecttango.examples.java.floorplanreconstruction;

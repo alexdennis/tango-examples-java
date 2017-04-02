@@ -29,11 +29,15 @@ import com.google.atap.tangoservice.TangoPointCloudData;
 import com.google.atap.tangoservice.TangoPoseData;
 import com.google.atap.tangoservice.TangoXyzIjData;
 
+import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
+import android.app.AlertDialog;
 import android.content.ContentValues;
+import android.content.DialogInterface;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.hardware.Camera;
 import android.hardware.display.DisplayManager;
@@ -44,10 +48,11 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Display;
-import android.view.Surface;
 import android.view.View;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
@@ -75,14 +80,14 @@ import com.projecttango.tangosupport.TangoSupport;
  * This example renders the point cloud of the depth camera into an OpenGL depth texture, and
  * renders the TangoRGB camera into an OpenGL texture.
  * It creates a standard Android {@code GLSurfaceView} with an OpenGL renderer and connects to
- * the Tango service with the appropriate configuration for Video rendering.
+ * the Tango Service with the appropriate configuration for video rendering.
  * Each time a new RGB video frame is available through the Tango APIs, it is updated to the
  * OpenGL texture and the corresponding timestamp is printed on the logcat.
  * It uses Tango Support library to synchronize the point cloud at the timestamp it was acquired to
  * the RGB camera at the timestamp it was updated. This is done through the
  * {@code CalculateRelativePose} method.
  * <p/>
- * The OpenGL code necessary to do the rendering is is {@code GreenScreenRenderer}.
+ * The OpenGL code necessary to do the rendering is {@code GreenScreenRenderer}.
  * The OpenGL code necessary to understand how to render the point cloud to a depth texture is
  * provided in {@code DepthTexture}.
  * The OpenGL code necessary to understand how to render the specific texture format
@@ -94,6 +99,10 @@ public class GreenScreenActivity extends AppCompatActivity {
     private static final int INVALID_TEXTURE_ID = 0;
     // For all current Tango devices, color camera is in the camera id 0.
     private static final int COLOR_CAMERA_ID = 0;
+
+    private static final String CAMERA_PERMISSION = Manifest.permission.CAMERA;
+    private static final String WRITE_PERMISSION = Manifest.permission.WRITE_EXTERNAL_STORAGE;
+    private static final int MULTIPLE_PERMISSION_CODE = 0;
 
     private SeekBar mDepthSeekbar;
     private FrameLayout mPanelFlash;
@@ -111,7 +120,7 @@ public class GreenScreenActivity extends AppCompatActivity {
     private AtomicBoolean mIsFrameAvailableTangoThread = new AtomicBoolean(false);
     private double mRgbTimestampGlThread;
 
-    private int mColorCameraToDisplayAndroidRotation = 0;
+    private int mDisplayRotation = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -132,7 +141,7 @@ public class GreenScreenActivity extends AppCompatActivity {
                 @Override
                 public void onDisplayChanged(int displayId) {
                     synchronized (this) {
-                        setAndroidOrientation();
+                        setDisplayRotation();
                     }
                 }
 
@@ -145,48 +154,24 @@ public class GreenScreenActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
+    protected void onStart() {
+        super.onStart();
         mSurfaceView.onResume();
 
-        setAndroidOrientation();
-
-        // Set render mode to RENDERMODE_CONTINUOUSLY to force getting onDraw callbacks until the
-        // Tango service is properly set-up and we start getting onFrameAvailable callbacks.
+        // Set render mode to RENDERMODE_CONTINUOUSLY to force getting onDraw callbacks until
+        // the Tango Service is properly set up and we start getting onFrameAvailable callbacks.
         mSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
-
-        // Initialize Tango Service as a normal Android Service, since we call mTango.disconnect()
-        // in onPause, this will unbind Tango Service, so every time when onResume gets called, we
-        // should create a new Tango object.
-        mTango = new Tango(GreenScreenActivity.this, new Runnable() {
-            // Pass in a Runnable to be called from UI thread when Tango is ready, this Runnable
-            // will be running on a new thread.
-            // When Tango is ready, we can call Tango functions safely here only when there is no UI
-            // thread changes involved.
-            @Override
-            public void run() {
-                synchronized (GreenScreenActivity.this) {
-                    try {
-                        TangoSupport.initialize();
-                        mConfig = setupTangoConfig(mTango);
-                        mTango.connect(mConfig);
-                        startupTango();
-                        mIsConnected = true;
-                    } catch (TangoOutOfDateException e) {
-                        Log.e(TAG, getString(R.string.exception_out_of_date), e);
-                    } catch (TangoErrorException e) {
-                        Log.e(TAG, getString(R.string.exception_tango_error), e);
-                    } catch (TangoInvalidException e) {
-                        Log.e(TAG, getString(R.string.exception_tango_invalid), e);
-                    }
-                }
-            }
-        });
+        // Check and request permissions at run time.
+        if (hasPermissions()) {
+            bindTangoService();
+        } else {
+            requestPermissions();
+        }
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
+    protected void onStop() {
+        super.onStop();
         mSurfaceView.onPause();
         // Synchronize against disconnecting while the service is being used in the OpenGL thread or
         // in the UI thread.
@@ -198,13 +183,50 @@ public class GreenScreenActivity extends AppCompatActivity {
                 mIsConnected = false;
                 mTango.disconnectCamera(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
                 // We need to invalidate the connected texture ID so that we cause a
-                // re-connection in the OpenGL thread after resume
+                // re-connection in the OpenGL thread after resume.
                 mConnectedTextureIdGlThread = INVALID_TEXTURE_ID;
                 mTango.disconnect();
             } catch (TangoErrorException e) {
                 Log.e(TAG, getString(R.string.exception_tango_error), e);
             }
         }
+    }
+
+    /**
+     * Initialize Tango Service as a normal Android Service.
+     */
+    private void bindTangoService() {
+        // Initialize Tango Service as a normal Android Service. Since we call mTango.disconnect()
+        // in onPause, this will unbind Tango Service, so every time onResume gets called we
+        // should create a new Tango object.
+        mTango = new Tango(GreenScreenActivity.this, new Runnable() {
+            // Pass in a Runnable to be called from UI thread when Tango is ready, this Runnable
+            // will be running on a new thread.
+            // When Tango is ready, we can call Tango functions safely here only when there are no
+            // UI thread changes involved.
+            @Override
+            public void run() {
+                synchronized (GreenScreenActivity.this) {
+                    try {
+                        TangoSupport.initialize();
+                        mConfig = setupTangoConfig(mTango);
+                        mTango.connect(mConfig);
+                        startupTango();
+                        mIsConnected = true;
+                        setDisplayRotation();
+                    } catch (TangoOutOfDateException e) {
+                        Log.e(TAG, getString(R.string.exception_out_of_date), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_out_of_date);
+                    } catch (TangoErrorException e) {
+                        Log.e(TAG, getString(R.string.exception_tango_error), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_tango_error);
+                    } catch (TangoInvalidException e) {
+                        Log.e(TAG, getString(R.string.exception_tango_invalid), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_tango_invalid);
+                    }
+                }
+            }
+        });
     }
 
     /**
@@ -218,10 +240,10 @@ public class GreenScreenActivity extends AppCompatActivity {
         config.putBoolean(TangoConfig.KEY_BOOLEAN_COLORCAMERA, true);
         config.putBoolean(TangoConfig.KEY_BOOLEAN_DEPTH, true);
         // NOTE: Low latency integration is necessary to achieve a precise alignment of
-        // virtual objects with the RBG image and produce a good AR effect.
+        // virtual objects with the RGB image and produce a good AR effect.
         config.putBoolean(TangoConfig.KEY_BOOLEAN_LOWLATENCYIMUINTEGRATION, true);
         // Drift correction allows motion tracking to recover after it loses tracking.
-        // The drift corrected pose is is available through the frame pair with
+        // The drift corrected pose is available through the frame pair with
         // base frame AREA_DESCRIPTION and target frame DEVICE.
         config.putBoolean(TangoConfig.KEY_BOOLEAN_DRIFT_CORRECTION, true);
         config.putInt(TangoConfig.KEY_INT_DEPTH_MODE, TangoConfig.TANGO_DEPTH_MODE_POINT_CLOUD);
@@ -267,7 +289,7 @@ public class GreenScreenActivity extends AppCompatActivity {
                 if (cameraId == TangoCameraIntrinsics.TANGO_CAMERA_COLOR) {
                     // Now that we are receiving onFrameAvailable callbacks, we can switch
                     // to RENDERMODE_WHEN_DIRTY to drive the render loop from this callback.
-                    // This will result on a frame rate of  approximately 30FPS, in synchrony with
+                    // This will result in a frame rate of approximately 30FPS, in synchrony with
                     // the RGB camera driver.
                     // If you need to render at a higher rate (i.e.: if you want to render complex
                     // animations smoothly) you  can use RENDERMODE_CONTINUOUSLY throughout the
@@ -276,7 +298,7 @@ public class GreenScreenActivity extends AppCompatActivity {
                         mSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
                     }
 
-                    // Mark a camera frame is available for rendering in the OpenGL thread.
+                    // Mark a camera frame as available for rendering in the OpenGL thread.
                     mIsFrameAvailableTangoThread.set(true);
                     // Trigger an OpenGL render to update the OpenGL scene with the new RGB data.
                     mSurfaceView.requestRender();
@@ -289,8 +311,8 @@ public class GreenScreenActivity extends AppCompatActivity {
     }
 
     /**
-     * Here is where you would set-up your rendering logic. We're replacing it with a minimalistic,
-     * dummy example using a standard GLSurfaceView and a basic renderer, for illustration purposes
+     * Here is where you would set up your rendering logic. We're replacing it with a minimalistic,
+     * dummy example, using a standard GLSurfaceView and a basic renderer, for illustration purposes
      * only.
      */
     private void setupRenderer() {
@@ -303,7 +325,7 @@ public class GreenScreenActivity extends AppCompatActivity {
                         // This is the work that you would do on your main OpenGL render thread.
 
                         // We need to be careful to not run any Tango-dependent code in the
-                        // OpenGL thread unless we know the Tango service to be properly set-up
+                        // OpenGL thread unless we know the Tango Service to be properly set up
                         // and connected.
                         if (!mIsConnected) {
                             return;
@@ -315,13 +337,13 @@ public class GreenScreenActivity extends AppCompatActivity {
                             // Connect the Tango SDK to the OpenGL texture ID where we are
                             // going to render the camera.
                             // NOTE: This must be done after both the texture is generated
-                            // and the Tango service is connected.
+                            // and the Tango Service is connected.
                             if (mConnectedTextureIdGlThread != mRenderer.getTextureId()) {
                                 mTango.connectTextureId(TangoCameraIntrinsics.TANGO_CAMERA_COLOR,
                                         mRenderer.getTextureId());
                                 mConnectedTextureIdGlThread = mRenderer.getTextureId();
                                 Log.d(TAG, "connected to texture id: " + mRenderer.getTextureId());
-                                // Set-up scene camera projection to match RGB camera intrinsics.
+                                // Set up scene camera projection to match RGB camera intrinsics.
                                 mRenderer.setProjectionMatrix(
                                         projectionMatrixFromCameraIntrinsics(mIntrinsics));
                                 mRenderer.setCameraIntrinsics(mIntrinsics);
@@ -412,30 +434,6 @@ public class GreenScreenActivity extends AppCompatActivity {
         mSurfaceView.setRenderer(mRenderer);
     }
 
-    private static int getColorCameraToDisplayAndroidRotation(int displayRotation,
-                                                              int cameraRotation) {
-        int cameraRotationNormalized = 0;
-        switch (cameraRotation) {
-            case 90:
-                cameraRotationNormalized = 1;
-                break;
-            case 180:
-                cameraRotationNormalized = 2;
-                break;
-            case 270:
-                cameraRotationNormalized = 3;
-                break;
-            default:
-                cameraRotationNormalized = 0;
-                break;
-        }
-        int ret = displayRotation - cameraRotationNormalized;
-        if (ret < 0) {
-            ret += 4;
-        }
-        return ret;
-    }
-
     /**
      * Use Tango camera intrinsics to calculate the projection Matrix for the OpenGL scene.
      */
@@ -465,21 +463,106 @@ public class GreenScreenActivity extends AppCompatActivity {
     /**
      * Set the color camera background texture rotation and save the camera to display rotation.
      */
-    private void setAndroidOrientation() {
+    private void setDisplayRotation() {
         Display display = getWindowManager().getDefaultDisplay();
-        Camera.CameraInfo colorCameraInfo = new Camera.CameraInfo();
-        Camera.getCameraInfo(COLOR_CAMERA_ID, colorCameraInfo);
+        mDisplayRotation = display.getRotation();
 
-        mColorCameraToDisplayAndroidRotation =
-                getColorCameraToDisplayAndroidRotation(display.getRotation(),
-                        colorCameraInfo.orientation);
-        // Run this in the OpenGL thread.
+        // We also need to update the camera texture UV coordinates. This must be run in the OpenGL
+        // thread.
         mSurfaceView.queueEvent(new Runnable() {
             @Override
             public void run() {
-                mRenderer.updateColorCameraTextureUv(mColorCameraToDisplayAndroidRotation);
+                if (mIsConnected) {
+                    mRenderer.updateColorCameraTextureUv(mDisplayRotation);
+                }
             }
         });
+    }
+
+    /**
+     * Check to see if we have the necessary permissions for this app; ask for them if we don't.
+     *
+     * @return True if we have the necessary permissions, false if we don't.
+     */
+    private boolean checkAndRequestPermissions() {
+        if (!hasPermissions()) {
+            requestPermissions();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Check to see if we have camera and write external storage permissions for this app.
+     */
+    private boolean hasPermissions() {
+        return ContextCompat.checkSelfPermission(this, CAMERA_PERMISSION) ==
+                PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, WRITE_PERMISSION) ==
+                        PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * Request the necessary permissions for this app.
+     */
+    private void requestPermissions() {
+        if (ActivityCompat.shouldShowRequestPermissionRationale(this, CAMERA_PERMISSION) ||
+                ActivityCompat.shouldShowRequestPermissionRationale(this, WRITE_PERMISSION)) {
+            showRequestPermissionRationale();
+        } else {
+            ActivityCompat.requestPermissions(this, new String[]{CAMERA_PERMISSION,
+                    WRITE_PERMISSION}, MULTIPLE_PERMISSION_CODE);
+        }
+    }
+
+    /**
+     * If the user has declined the permission before, we have to explain that the app needs this
+     * permission.
+     */
+    private void showRequestPermissionRationale() {
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setMessage("Java Green Screen Example requires camera and write external " +
+                        "storage permissions")
+                .setPositiveButton("Ok", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialogInterface, int i) {
+                        ActivityCompat.requestPermissions(GreenScreenActivity.this,
+                                new String[]{CAMERA_PERMISSION, WRITE_PERMISSION},
+                                MULTIPLE_PERMISSION_CODE);
+                    }
+                })
+                .create();
+        dialog.show();
+    }
+
+    /**
+     * Display toast on UI thread.
+     *
+     * @param resId The resource id of the string resource to use. Can be formatted text.
+     */
+    private void showsToastAndFinishOnUiThread(final int resId) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(GreenScreenActivity.this,
+                        getString(resId), Toast.LENGTH_LONG).show();
+                finish();
+            }
+        });
+    }
+
+    /**
+     * Result for requesting camera and write external storage permissions.
+     */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        if (hasPermissions()) {
+            bindTangoService();
+        } else {
+            Toast.makeText(this, "Java Green Screen Example requires camera and write " +
+                    "external storage permissions", Toast.LENGTH_LONG).show();
+        }
     }
 
     /*
@@ -610,5 +693,3 @@ public class GreenScreenActivity extends AppCompatActivity {
         }
     }
 }
-
-

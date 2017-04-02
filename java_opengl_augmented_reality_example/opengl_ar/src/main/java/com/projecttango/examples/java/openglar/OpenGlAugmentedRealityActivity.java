@@ -15,7 +15,6 @@
  */
 
 package com.projecttango.examples.java.openglar;
-
 import com.google.atap.tangoservice.Tango;
 import com.google.atap.tangoservice.Tango.OnTangoUpdateListener;
 import com.google.atap.tangoservice.TangoCameraIntrinsics;
@@ -29,15 +28,22 @@ import com.google.atap.tangoservice.TangoPointCloudData;
 import com.google.atap.tangoservice.TangoPoseData;
 import com.google.atap.tangoservice.TangoXyzIjData;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.content.pm.PackageManager;
 import android.hardware.Camera;
 import android.hardware.display.DisplayManager;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.os.Bundle;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import android.view.Display;
 import android.view.Surface;
+import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,13 +52,13 @@ import com.projecttango.tangosupport.TangoSupport;
 
 /**
  * This is a simple example that shows how to use the Tango APIs to create an augmented reality
- * application. It display the Earth floating in space one meter in front of the device and the Moon
- * rotating around the Earth.
+ * application. It displays the Earth floating in space one meter in front of the device and the
+ * Moon rotating around the Earth.
  * <p/>
- * This example render the TangoRGB camera into an OpenGL texture and get the device pose
+ * This example renders the TangoRGB camera into an OpenGL texture and gets the device pose
  * information to update the scene camera accordingly.
  * It creates a standard Android {@code GLSurfaceView} with an OpenGL renderer and connects to
- * the Tango service with the appropriate configuration for Video rendering.
+ * the Tango Service with the appropriate configuration for video rendering.
  * Each time a new RGB video frame is available through the Tango APIs, it is updated to the
  * OpenGL texture and the corresponding timestamp is printed on the logcat.
  * In addition, the device is queried for its pose at the exact time the RGB camera frame was
@@ -69,12 +75,12 @@ import com.projecttango.tangosupport.TangoSupport;
 public class OpenGlAugmentedRealityActivity extends Activity {
     private static final String TAG = OpenGlAugmentedRealityActivity.class.getSimpleName();
     private static final int INVALID_TEXTURE_ID = 0;
-    // For all current Tango devices, color camera is in the camera id 0.
-    private static final int COLOR_CAMERA_ID = 0;
+
+    private static final String CAMERA_PERMISSION = Manifest.permission.CAMERA;
+    private static final int CAMERA_PERMISSION_CODE = 0;
 
     private GLSurfaceView mSurfaceView;
     private OpenGlAugmentedRealityRenderer mRenderer;
-    private TangoCameraIntrinsics mIntrinsics;
     private Tango mTango;
     private TangoConfig mConfig;
     private boolean mIsConnected = false;
@@ -87,16 +93,16 @@ public class OpenGlAugmentedRealityActivity extends Activity {
 
     // Transform from the Earth and Moon center to OpenGL frame. This is a fixed transform.
     private float[] mOpenGLTEarthMoonCenter = new float[16];
-    // Transform from Earth to Earth and Moon center. This will change over time, as the Earth is
+    // Transform from Earth to Earth and Moon center. This will change over time as the Earth is
     // rotating.
     private float[] mEarthMoonCenterTEarth = new float[16];
     // Translation from the Moon to the Earth and Moon center. This is a fixed transform.
     private float[] mEarthMoonCenterTTranslation = new float[16];
-    // Rotation from the Moon to the Earth and Moon center. This will change over time, as the Moon
+    // Rotation from the Moon to the Earth and Moon center. This will change over time as the Moon
     // is rotating.
     private float[] mEarthMoonCenterTMoonRotation = new float[16];
 
-    private int mColorCameraToDisplayAndroidRotation = 0;
+    private int mDisplayRotation = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,17 +113,19 @@ public class OpenGlAugmentedRealityActivity extends Activity {
         if (displayManager != null) {
             displayManager.registerDisplayListener(new DisplayManager.DisplayListener() {
                 @Override
-                public void onDisplayAdded(int displayId) {}
+                public void onDisplayAdded(int displayId) {
+                }
 
                 @Override
                 public void onDisplayChanged(int displayId) {
                     synchronized (this) {
-                        setAndroidOrientation();
+                        setDisplayRotation();
                     }
                 }
 
                 @Override
-                public void onDisplayRemoved(int displayId) {}
+                public void onDisplayRemoved(int displayId) {
+                }
             }, null);
         }
 
@@ -125,24 +133,54 @@ public class OpenGlAugmentedRealityActivity extends Activity {
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
+    protected void onStart() {
+        super.onStart();
         mSurfaceView.onResume();
 
-        setAndroidOrientation();
-
-        // Set render mode to RENDERMODE_CONTINUOUSLY to force getting onDraw callbacks until the
-        // Tango service is properly set-up and we start getting onFrameAvailable callbacks.
+        // Set render mode to RENDERMODE_CONTINUOUSLY to force getting onDraw callbacks until
+        // the Tango service is properly set-up and we start getting onFrameAvailable callbacks.
         mSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+        // Check and request camera permission at run time.
+        if (checkAndRequestPermissions()) {
+            bindTangoService();
+        }
+    }
 
-        // Initialize Tango Service as a normal Android Service, since we call mTango.disconnect()
-        // in onPause, this will unbind Tango Service, so every time when onResume gets called, we
+    @Override
+    protected void onStop() {
+        super.onStop();
+        mSurfaceView.onPause();
+        // Synchronize against disconnecting while the service is being used in the OpenGL thread or
+        // in the UI thread.
+        // NOTE: DO NOT lock against this same object in the Tango callback thread. Tango.disconnect
+        // will block here until all Tango callback calls are finished. If you lock against this
+        // object in a Tango callback thread it will cause a deadlock.
+        synchronized (this) {
+            try {
+               mIsConnected = false;
+               mTango.disconnectCamera(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
+               // We need to invalidate the connected texture ID so that we cause a
+               // re-connection in the OpenGL thread after resume.
+               mConnectedTextureIdGlThread = INVALID_TEXTURE_ID;
+               mTango.disconnect();
+            } catch (TangoErrorException e) {
+                Log.e(TAG, getString(R.string.exception_tango_error), e);
+            }
+        }
+    }
+
+    /**
+     * Initialize Tango Service as a normal Android Service.
+     */
+    private void bindTangoService() {
+        // Initialize Tango Service as a normal Android Service. Since we call mTango.disconnect()
+        // in onPause, this will unbind Tango Service, so every time onResume gets called we
         // should create a new Tango object.
         mTango = new Tango(OpenGlAugmentedRealityActivity.this, new Runnable() {
-            // Pass in a Runnable to be called from UI thread when Tango is ready, this Runnable
+            // Pass in a Runnable to be called from UI thread when Tango is ready; this Runnable
             // will be running on a new thread.
-            // When Tango is ready, we can call Tango functions safely here only when there is no UI
-            // thread changes involved.
+            // When Tango is ready, we can call Tango functions safely here only when there are no
+            // UI thread changes involved.
             @Override
             public void run() {
                 // Synchronize against disconnecting while the service is being used in the OpenGL
@@ -154,39 +192,20 @@ public class OpenGlAugmentedRealityActivity extends Activity {
                         mTango.connect(mConfig);
                         startupTango();
                         mIsConnected = true;
+                        setDisplayRotation();
                     } catch (TangoOutOfDateException e) {
                         Log.e(TAG, getString(R.string.exception_out_of_date), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_out_of_date);
                     } catch (TangoErrorException e) {
                         Log.e(TAG, getString(R.string.exception_tango_error), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_tango_error);
                     } catch (TangoInvalidException e) {
                         Log.e(TAG, getString(R.string.exception_tango_invalid), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_tango_invalid);
                     }
                 }
             }
         });
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        mSurfaceView.onPause();
-        // Synchronize against disconnecting while the service is being used in the OpenGL thread or
-        // in the UI thread.
-        // NOTE: DO NOT lock against this same object in the Tango callback thread. Tango.disconnect
-        // will block here until all Tango callback calls are finished. If you lock against this
-        // object in a Tango callback thread it will cause a deadlock.
-        synchronized (this) {
-            try {
-                mIsConnected = false;
-                mTango.disconnectCamera(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
-                // We need to invalidate the connected texture ID so that we cause a
-                // re-connection in the OpenGL thread after resume
-                mConnectedTextureIdGlThread = INVALID_TEXTURE_ID;
-                mTango.disconnect();
-            } catch (TangoErrorException e) {
-                Log.e(TAG, getString(R.string.exception_tango_error), e);
-            }
-        }
     }
 
     /**
@@ -199,10 +218,10 @@ public class OpenGlAugmentedRealityActivity extends Activity {
         TangoConfig config = tango.getConfig(TangoConfig.CONFIG_TYPE_DEFAULT);
         config.putBoolean(TangoConfig.KEY_BOOLEAN_COLORCAMERA, true);
         // NOTE: Low latency integration is necessary to achieve a precise alignment of
-        // virtual objects with the RBG image and produce a good AR effect.
+        // virtual objects with the RGB image and produce a good AR effect.
         config.putBoolean(TangoConfig.KEY_BOOLEAN_LOWLATENCYIMUINTEGRATION, true);
         // Drift correction allows motion tracking to recover after it loses tracking.
-        // The drift corrected pose is is available through the frame pair with
+        // The drift corrected pose is available through the frame pair with
         // base frame AREA_DESCRIPTION and target frame DEVICE.
         config.putBoolean(TangoConfig.KEY_BOOLEAN_DRIFT_CORRECTION, true);
 
@@ -210,7 +229,7 @@ public class OpenGlAugmentedRealityActivity extends Activity {
     }
 
     /**
-     * Set up the callback listeners for the Tango service and obtain other parameters required
+     * Set up the callback listeners for the Tango Service and obtain other parameters required
      * after Tango connection.
      * Listen to updates from the RGB camera.
      */
@@ -246,30 +265,27 @@ public class OpenGlAugmentedRealityActivity extends Activity {
                 if (cameraId == TangoCameraIntrinsics.TANGO_CAMERA_COLOR) {
                     // Now that we are receiving onFrameAvailable callbacks, we can switch
                     // to RENDERMODE_WHEN_DIRTY to drive the render loop from this callback.
-                    // This will result on a frame rate of  approximately 30FPS, in synchrony with
+                    // This will result in a frame rate of approximately 30FPS, in synchrony with
                     // the RGB camera driver.
-                    // If you need to render at a higher rate (i.e.: if you want to render complex
-                    // animations smoothly) you  can use RENDERMODE_CONTINUOUSLY throughout the
+                    // If you need to render at a higher rate (i.e., if you want to render complex
+                    // animations smoothly) you can use RENDERMODE_CONTINUOUSLY throughout the
                     // application lifecycle.
                     if (mSurfaceView.getRenderMode() != GLSurfaceView.RENDERMODE_WHEN_DIRTY) {
                         mSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
                     }
 
-                    // Mark a camera frame is available for rendering in the OpenGL thread.
+                    // Mark a camera frame as available for rendering in the OpenGL thread.
                     mIsFrameAvailableTangoThread.set(true);
                     // Trigger an OpenGL render to update the OpenGL scene with the new RGB data.
                     mSurfaceView.requestRender();
                 }
             }
         });
-
-        // Obtain the intrinsic parameters of the color camera.
-        mIntrinsics = mTango.getCameraIntrinsics(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
     }
 
     /**
-     * Here is where you would set-up your rendering logic. We're replacing it with a minimalistic,
-     * dummy example using a standard GLSurfaceView and a basic renderer, for illustration purposes
+     * Here is where you would set up your rendering logic. We're replacing it with a minimalistic,
+     * dummy example, using a standard GLSurfaceView and a basic renderer, for illustration purposes
      * only.
      */
     private void setupRenderer() {
@@ -286,23 +302,26 @@ public class OpenGlAugmentedRealityActivity extends Activity {
                             // Synchronize against concurrently disconnecting the service triggered
                             // from the UI thread.
                             synchronized (OpenGlAugmentedRealityActivity.this) {
-                                // We need to be careful to not run any Tango-dependent code in the
-                                // OpenGL thread unless we know the Tango service to be properly
-                                // set-up and connected.
+                                // We need to be careful not to run any Tango-dependent code in the
+                                // OpenGL thread unless we know the Tango Service is properly
+                                // set up and connected.
                                 if (!mIsConnected) {
                                     return;
                                 }
 
-                                // Set-up scene camera projection to match RGB camera intrinsics.
+                                // Set up scene camera projection to match RGB camera intrinsics.
                                 if (!mRenderer.isProjectionMatrixConfigured()) {
+                                    TangoCameraIntrinsics intrinsics =
+                                            TangoSupport.getCameraIntrinsicsBasedOnDisplayRotation(
+                                                    TangoCameraIntrinsics.TANGO_CAMERA_COLOR,
+                                                    mDisplayRotation);
                                     mRenderer.setProjectionMatrix(
-                                            projectionMatrixFromCameraIntrinsics(mIntrinsics,
-                                                    mColorCameraToDisplayAndroidRotation));
+                                            projectionMatrixFromCameraIntrinsics(intrinsics));
                                 }
                                 // Connect the Tango SDK to the OpenGL texture ID where we are
                                 // going to render the camera.
                                 // NOTE: This must be done after both the texture is generated
-                                // and the Tango service is connected.
+                                // and the Tango Service is connected.
                                 if (mConnectedTextureIdGlThread != mRenderer.getTextureId()) {
                                     mTango.connectTextureId(
                                             TangoCameraIntrinsics.TANGO_CAMERA_COLOR,
@@ -325,7 +344,7 @@ public class OpenGlAugmentedRealityActivity extends Activity {
                                     //
                                     // When drift correction mode is enabled in config file, we need
                                     // to query the device with respect to Area Description pose in
-                                    // order to use the drift corrected pose.
+                                    // order to use the drift-corrected pose.
                                     //
                                     // Note that if you don't want to use the drift corrected pose,
                                     // the normal device with respect to start of service pose is
@@ -338,7 +357,7 @@ public class OpenGlAugmentedRealityActivity extends Activity {
                                                     TangoPoseData.COORDINATE_FRAME_CAMERA_COLOR,
                                                     TangoSupport.TANGO_SUPPORT_ENGINE_OPENGL,
                                                     TangoSupport.TANGO_SUPPORT_ENGINE_OPENGL,
-                                                    mColorCameraToDisplayAndroidRotation);
+                                                    mDisplayRotation);
                                     if (transform.statusCode == TangoPoseData.POSE_VALID) {
 
                                         mRenderer.updateViewMatrix(transform.matrix);
@@ -371,14 +390,14 @@ public class OpenGlAugmentedRealityActivity extends Activity {
                                         // When the pose status is not valid, it indicates tracking
                                         // has been lost. In this case, we simply stop rendering.
                                         //
-                                        // This is also the place to display UI to suggest the user
-                                        // walk to recover tracking.
+                                        // This is also the place to display UI to suggest that the
+                                        // user walk to recover tracking.
                                         Log.w(TAG, "Could not get a valid transform at time " +
                                                 mRgbTimestampGlThread);
                                     }
                                 }
                             }
-                            // Avoid crashing the application due to unhandled exceptions
+                            // Avoid crashing the application due to unhandled exceptions.
                         } catch (TangoErrorException e) {
                             Log.e(TAG, "Tango API call error within the OpenGL render thread", e);
                         } catch (Throwable t) {
@@ -387,7 +406,8 @@ public class OpenGlAugmentedRealityActivity extends Activity {
                     }
                 });
 
-        // Set the starting position and orientation of the Earth and Moon respect the OpenGL frame.
+        // Set the starting position and orientation of the Earth and Moon with respect to the
+        // OpenGL frame.
         Matrix.setIdentityM(mOpenGLTEarthMoonCenter, 0);
         Matrix.translateM(mOpenGLTEarthMoonCenter, 0, 0, 0, -1f);
         Matrix.setIdentityM(mEarthMoonCenterTEarth, 0);
@@ -398,38 +418,12 @@ public class OpenGlAugmentedRealityActivity extends Activity {
         mSurfaceView.setRenderer(mRenderer);
     }
 
-    private static int getColorCameraToDisplayAndroidRotation(int displayRotation,
-                                                              int cameraRotation) {
-        int cameraRotationNormalized = 0;
-        switch (cameraRotation) {
-            case 90:
-                cameraRotationNormalized = 1;
-                break;
-            case 180:
-                cameraRotationNormalized = 2;
-                break;
-            case 270:
-                cameraRotationNormalized = 3;
-                break;
-            default:
-                cameraRotationNormalized = 0;
-                break;
-        }
-        int ret = displayRotation - cameraRotationNormalized;
-        if (ret < 0) {
-            ret += 4;
-        }
-        return ret;
-    }
-
     /**
      * Use Tango camera intrinsics to calculate the projection Matrix for the OpenGL scene.
+     *
      * @param intrinsics camera instrinsics for computing the project matrix.
-     * @param rotation the relative rotation between the camera intrinsics and display glContext.
      */
-    private static float[] projectionMatrixFromCameraIntrinsics(TangoCameraIntrinsics intrinsics,
-                                                                int rotation) {
-        // Adjust camera intrinsics according to rotation
+    private static float[] projectionMatrixFromCameraIntrinsics(TangoCameraIntrinsics intrinsics) {
         float cx = (float) intrinsics.cx;
         float cy = (float) intrinsics.cy;
         float width = (float) intrinsics.width;
@@ -437,32 +431,7 @@ public class OpenGlAugmentedRealityActivity extends Activity {
         float fx = (float) intrinsics.fx;
         float fy = (float) intrinsics.fy;
 
-        switch (rotation) {
-            case Surface.ROTATION_90:
-                cx = (float) intrinsics.cy;
-                cy = (float) intrinsics.width - (float) intrinsics.cx;
-                width = (float) intrinsics.height;
-                height = (float) intrinsics.width;
-                fx = (float) intrinsics.fy;
-                fy = (float) intrinsics.fx;
-                break;
-            case Surface.ROTATION_180:
-                cx = (float) intrinsics.width - cx;
-                cy = (float) intrinsics.height - cy;
-                break;
-            case Surface.ROTATION_270:
-                cx = (float) intrinsics.height - (float) intrinsics.cy;
-                cy = (float) intrinsics.cx;
-                width = (float) intrinsics.height;
-                height = (float) intrinsics.width;
-                fx = (float) intrinsics.fy;
-                fy = (float) intrinsics.fx;
-                break;
-            default:
-                break;
-        }
-
-        // Uses frustumM to create a projection matrix taking into account calibrated camera
+        // Uses frustumM to create a projection matrix, taking into account calibrated camera
         // intrinsic parameter.
         // Reference: http://ksimek.github.io/2013/06/03/calibrated_cameras_in_opengl/
         float near = 0.1f;
@@ -487,20 +456,100 @@ public class OpenGlAugmentedRealityActivity extends Activity {
     /**
      * Set the color camera background texture rotation and save the camera to display rotation.
      */
-    private void setAndroidOrientation() {
+    private void setDisplayRotation() {
         Display display = getWindowManager().getDefaultDisplay();
-        Camera.CameraInfo colorCameraInfo = new Camera.CameraInfo();
-        Camera.getCameraInfo(COLOR_CAMERA_ID, colorCameraInfo);
+        mDisplayRotation = display.getRotation();
 
-        mColorCameraToDisplayAndroidRotation =
-                getColorCameraToDisplayAndroidRotation(display.getRotation(),
-                        colorCameraInfo.orientation);
-        // Run this in the OpenGL thread.
+        // We also need to update the camera texture UV coordinates. This must be run in the OpenGL
+        // thread.
         mSurfaceView.queueEvent(new Runnable() {
             @Override
             public void run() {
-                mRenderer.updateColorCameraTextureUv(mColorCameraToDisplayAndroidRotation);
+                if (mIsConnected) {
+                    mRenderer.updateColorCameraTextureUv(mDisplayRotation);
+                }
             }
         });
+    }
+
+    /**
+     * Check to see that we have the necessary permissions for this app; ask for them if we don't.
+     *
+     * @return True if we have the necessary permissions, false if we don't.
+     */
+    private boolean checkAndRequestPermissions() {
+        if (!hasCameraPermission()) {
+            requestCameraPermission();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Check to see that we have the necessary permissions for this app.
+     */
+    private boolean hasCameraPermission() {
+        return ContextCompat.checkSelfPermission(this, CAMERA_PERMISSION) ==
+                PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * Request the necessary permissions for this app.
+     */
+    private void requestCameraPermission() {
+        if (ActivityCompat.shouldShowRequestPermissionRationale(this, CAMERA_PERMISSION)) {
+            showRequestPermissionRationale();
+        } else {
+            ActivityCompat.requestPermissions(this, new String[]{CAMERA_PERMISSION},
+                    CAMERA_PERMISSION_CODE);
+        }
+    }
+
+    /**
+     * If the user has declined the permission before, we have to explain that the app needs this
+     * permission.
+     */
+    private void showRequestPermissionRationale() {
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setMessage("Java OpenGL Augmented Reality Example requires camera permission")
+                .setPositiveButton("Ok", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialogInterface, int i) {
+                        ActivityCompat.requestPermissions(OpenGlAugmentedRealityActivity.this,
+                                new String[]{CAMERA_PERMISSION}, CAMERA_PERMISSION_CODE);
+                    }
+                })
+                .create();
+        dialog.show();
+    }
+
+    /**
+     * Display toast on UI thread.
+     *
+     * @param resId The resource id of the string resource to use. Can be formatted text.
+     */
+    private void showsToastAndFinishOnUiThread(final int resId) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(OpenGlAugmentedRealityActivity.this,
+                        getString(resId), Toast.LENGTH_LONG).show();
+                finish();
+            }
+        });
+    }
+
+    /**
+     * Result for requesting camera permission.
+     */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        if (hasCameraPermission()) {
+            bindTangoService();
+        } else {
+            Toast.makeText(this, "Java OpenGL Augmented Reality Example requires camera permission",
+                    Toast.LENGTH_LONG).show();
+        }
     }
 }

@@ -38,12 +38,12 @@ import com.projecttango.tangosupport.TangoPointCloudManager;
 import com.projecttango.tangosupport.TangoSupport;
 
 /**
- * Uses the tango service data to build 3D meshes. Provides higher level functionality built on top
+ * Uses the Tango Service data to build 3D meshes. Provides higher level functionality built on top
  * of the {@code Tango3dReconstruction}. Given a point cloud it will report a callback with the
  * generated meshes. No color is needed in this example.
  * It abstracts all the needed thread management and pose requesting logic.
  */
-public class TangoMesher implements Tango.OnTangoUpdateListener {
+public class TangoMesher extends Tango.OnTangoUpdateListener {
 
     private static final String TAG = TangoMesher.class.getSimpleName();
     private final TangoPointCloudManager mPointCloudBuffer;
@@ -100,7 +100,7 @@ public class TangoMesher implements Tango.OnTangoUpdateListener {
                                 TangoPoseData.COORDINATE_FRAME_START_OF_SERVICE,
                                 TangoPoseData.COORDINATE_FRAME_CAMERA_DEPTH,
                                 TangoSupport.TANGO_SUPPORT_ENGINE_TANGO,
-                                TangoSupport.TANGO_SUPPORT_ENGINE_TANGO);
+                                TangoSupport.ROTATION_IGNORED);
                         if (depthPose.statusCode != TangoPoseData.POSE_VALID) {
                             Log.e(TAG, "couldn't extract a valid depth pose");
                             return;
@@ -115,6 +115,7 @@ public class TangoMesher implements Tango.OnTangoUpdateListener {
                             int indexCount = updatedIndices.size();
                             List<TangoMesh> meshes = new ArrayList<TangoMesh>(indexCount);
                             for (int i = 0; i < indexCount; ++i) {
+                                Log.d(TAG, "Extracting mesh");
                                 TangoMesh mesh = mTango3dReconstruction.extractMeshSegment(
                                         updatedIndices.get(i));
                                 if (mesh.numVertices > 0 && mesh.numFaces > 0) {
@@ -175,12 +176,12 @@ public class TangoMesher implements Tango.OnTangoUpdateListener {
 
     @Override
     public void onXyzIjAvailable(final TangoXyzIjData var1) {
-        // do nothing.
+        // Do nothing.
     }
 
     /**
      * Receives the depth point cloud. This method retrieves and stores the depth camera pose
-     * and point cloud to later use it when updating the {@code Tango3dReconstruction}.
+     * and point cloud to later use when updating the {@code Tango3dReconstruction}.
      *
      * @param tangoPointCloudData the depth point cloud.
      */

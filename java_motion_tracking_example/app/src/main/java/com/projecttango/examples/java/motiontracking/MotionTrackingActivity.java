@@ -32,8 +32,8 @@ import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
-import android.view.Surface;
 import android.view.WindowManager;
+import android.widget.Toast;
 
 import org.rajawali3d.scene.ASceneFrameCallback;
 import org.rajawali3d.surface.RajawaliSurfaceView;
@@ -45,7 +45,7 @@ import com.projecttango.tangosupport.TangoSupport;
 
 /**
  * Main Activity class for the Motion Tracking API Sample. Handles the connection to the Tango
- * service and propagation of Tango pose data to OpenGL and Layout views. OpenGL rendering logic is
+ * Service and propagation of Tango pose data to OpenGL and Layout views. OpenGL rendering logic is
  * delegated to the {@link MotionTrackingRajawaliRenderer} class.
  */
 public class MotionTrackingActivity extends Activity {
@@ -59,7 +59,7 @@ public class MotionTrackingActivity extends Activity {
 
     private AtomicBoolean mIsTangoPoseReady = new AtomicBoolean(false);
 
-    private int mCurrentDisplayOrientation = 0;
+    private int mDisplayRotation = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,12 +68,12 @@ public class MotionTrackingActivity extends Activity {
         // OpenGL view where all of the graphics are drawn.
         mSurfaceView = (RajawaliSurfaceView) findViewById(R.id.gl_surface_view);
         mRenderer = new MotionTrackingRajawaliRenderer(this);
-        
-        // Get current display orientation, note that each time display orientation
+
+        // Get current display orientation. Note that each time display orientation
         // changes, the onCreate function will be called again.
         WindowManager mWindowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         Display mDisplay = mWindowManager.getDefaultDisplay();
-        mCurrentDisplayOrientation = mDisplay.getOrientation();
+        mDisplayRotation = mDisplay.getRotation();
 
         // Configure OpenGL renderer.
         setupRenderer();
@@ -84,11 +84,11 @@ public class MotionTrackingActivity extends Activity {
         super.onResume();
         mSurfaceView.onResume();
 
-        // Initialize Tango Service as a normal Android Service, since we call mTango.disconnect()
-        // in onPause, this will unbind Tango Service, so every time when onResume gets called, we
+        // Initialize Tango Service as a normal Android Service. Since we call mTango.disconnect()
+        // in onPause, this will unbind Tango Service, so every time onResume gets called we
         // should create a new Tango object.
         mTango = new Tango(MotionTrackingActivity.this, new Runnable() {
-            // Pass in a Runnable to be called from UI thread when Tango is ready, this Runnable
+            // Pass in a Runnable to be called from UI thread when Tango is ready; this Runnable
             // will be running on a new thread.
             // When Tango is ready, we can call Tango functions safely here only when there is no UI
             // thread changes involved.
@@ -104,10 +104,13 @@ public class MotionTrackingActivity extends Activity {
                         startupTango();
                     } catch (TangoOutOfDateException e) {
                         Log.e(TAG, getString(R.string.exception_out_of_date), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_out_of_date);
                     } catch (TangoErrorException e) {
                         Log.e(TAG, getString(R.string.exception_tango_error), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_tango_error);
                     } catch (TangoInvalidException e) {
                         Log.e(TAG, getString(R.string.exception_tango_invalid), e);
+                        showsToastAndFinishOnUiThread(R.string.exception_tango_invalid);
                     }
                 }
             }
@@ -141,13 +144,13 @@ public class MotionTrackingActivity extends Activity {
         // Create a new Tango Configuration and enable the MotionTrackingActivity API.
         TangoConfig config = tango.getConfig(TangoConfig.CONFIG_TYPE_DEFAULT);
         config.putBoolean(TangoConfig.KEY_BOOLEAN_MOTIONTRACKING, true);
-        // Tango service should automatically attempt to recover when it enters an invalid state.
+        // Tango Service should automatically attempt to recover when it enters an invalid state.
         config.putBoolean(TangoConfig.KEY_BOOLEAN_AUTORECOVERY, true);
         return config;
     }
 
     /**
-     * Set up the callback listeners for the Tango service and obtain other parameters required
+     * Set up the callback listeners for the Tango Service and obtain other parameters required
      * after Tango connection.
      * Listen to pose data.
      */
@@ -163,7 +166,7 @@ public class MotionTrackingActivity extends Activity {
             @Override
             public void onPoseAvailable(final TangoPoseData pose) {
                 synchronized (MotionTrackingActivity.this) {
-                    // When we receive the first onPoseAvailable callback, we now the Tango has
+                    // When we receive the first onPoseAvailable callback, we know the device has
                     // located itself.
                     mIsTangoPoseReady.compareAndSet(false, true);
                 }
@@ -200,7 +203,7 @@ public class MotionTrackingActivity extends Activity {
         mRenderer.getCurrentScene().registerFrameCallback(new ASceneFrameCallback() {
             @Override
             public void onPreFrame(long sceneTime, double deltaTime) {
-                // If the Tango has not located itself, we won't do anything, since we can't get a
+                // If the device has not located itself, we won't do anything, since we can't get a
                 // valid pose.
                 if (!mIsTangoPoseReady.get()) {
                     return;
@@ -216,10 +219,10 @@ public class MotionTrackingActivity extends Activity {
                                         TangoPoseData.COORDINATE_FRAME_START_OF_SERVICE,
                                         TangoPoseData.COORDINATE_FRAME_DEVICE,
                                         TangoSupport.TANGO_SUPPORT_ENGINE_OPENGL,
-                                        mCurrentDisplayOrientation);
+                                        mDisplayRotation);
 
                         if (pose.statusCode == TangoPoseData.POSE_VALID) {
-                            // Update the camera pose from the renderer
+                            // Update the camera pose from the renderer.
                             mRenderer.updateRenderCameraPose(pose);
                         }
                     } catch (TangoErrorException e) {
@@ -247,5 +250,21 @@ public class MotionTrackingActivity extends Activity {
         mSurfaceView.setSurfaceRenderer(mRenderer);
         // Set render mode to RENDERMODE_CONTINUOUSLY.
         mSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    }
+
+    /**
+     * Display toast on UI thread.
+     *
+     * @param resId The resource id of the string resource to use. Can be formatted text.
+     */
+    private void showsToastAndFinishOnUiThread(final int resId) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(MotionTrackingActivity.this,
+                        getString(resId), Toast.LENGTH_LONG).show();
+                finish();
+            }
+        });
     }
 }

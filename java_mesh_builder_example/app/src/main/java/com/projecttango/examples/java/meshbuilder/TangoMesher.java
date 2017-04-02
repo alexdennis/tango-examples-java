@@ -40,12 +40,13 @@ import com.projecttango.tangosupport.TangoPointCloudManager;
 import com.projecttango.tangosupport.TangoSupport;
 
 /**
- * Uses the tango service data to build 3D meshes. Provides higher level functionality built on top
+ * Uses the Tango Service data to build 3D meshes. Provides higher level functionality built on top
  * of the {@code Tango3dReconstruction}. Given a point cloud and a color frame buffer it will
  * report a callback with the generated meshes. It abstracts all the needed thread management and
  * pose requesting logic.
  */
-public class TangoMesher implements Tango.OnTangoUpdateListener, Tango.OnFrameAvailableListener {
+public class TangoMesher extends Tango.OnTangoUpdateListener 
+    implements Tango.OnFrameAvailableListener{
 
     private static final String TAG = TangoMesher.class.getSimpleName();
     private final TangoPointCloudManager mPointCloudBuffer;
@@ -100,7 +101,7 @@ public class TangoMesher implements Tango.OnTangoUpdateListener, Tango.OnFrameAv
                                 TangoPoseData.COORDINATE_FRAME_START_OF_SERVICE,
                                 TangoPoseData.COORDINATE_FRAME_CAMERA_DEPTH,
                                 TangoSupport.TANGO_SUPPORT_ENGINE_TANGO,
-                                TangoSupport.TANGO_SUPPORT_ENGINE_TANGO);
+                                TangoSupport.ROTATION_IGNORED);
                         if (depthPose.statusCode != TangoPoseData.POSE_VALID) {
                             Log.e(TAG, "couldn't extract a valid depth pose");
                             return;
@@ -118,7 +119,7 @@ public class TangoMesher implements Tango.OnTangoUpdateListener, Tango.OnFrameAv
                                 TangoPoseData.COORDINATE_FRAME_START_OF_SERVICE,
                                 TangoPoseData.COORDINATE_FRAME_CAMERA_COLOR,
                                 TangoSupport.TANGO_SUPPORT_ENGINE_TANGO,
-                                TangoSupport.TANGO_SUPPORT_ENGINE_TANGO);
+                                TangoSupport.ROTATION_IGNORED);
                         if (imagePose.statusCode != TangoPoseData.POSE_VALID) {
                             Log.e(TAG, "couldn't extract a valid color pose");
                             return;
@@ -198,7 +199,7 @@ public class TangoMesher implements Tango.OnTangoUpdateListener, Tango.OnFrameAv
 
     /**
      * Receives the depth point cloud. This method retrieves and stores the depth camera pose
-     * and point cloud to later use it when updating the {@code Tango3dReconstruction}.
+     * and point cloud to later use when updating the {@code Tango3dReconstruction}.
      *
      * @param tangoPointCloudData the depth point cloud.
      */
@@ -224,12 +225,12 @@ public class TangoMesher implements Tango.OnTangoUpdateListener, Tango.OnFrameAv
     }
 
     /**
-     * Receives the rgb camera frame buffer. This method retrieves and stores the rgb camera pose
-     * and frame buffer to later use it when updating the {@code Tango3dReconstruction}.
+     * Receives the RGB camera frame buffer. This method retrieves and stores the RGB camera pose
+     * and frame buffer to later use when updating the {@code Tango3dReconstruction}.
      *
-     * @param tangoImageBuffer the image buffer containing the rgb color information.
-     * @param cameraId         The camera id, only {@code TangoCameraIntrinsics.TANGO_CAMERA_COLOR}
-     *                         is expected, all other cameras will be discarded.
+     * @param tangoImageBuffer the image buffer containing the RGB color information.
+     * @param cameraId         The camera id. Only {@code TangoCameraIntrinsics.TANGO_CAMERA_COLOR}
+     *                         is expected; all other cameras will be discarded.
      */
     @Override
     public void onFrameAvailable(TangoImageBuffer tangoImageBuffer, int cameraId) {

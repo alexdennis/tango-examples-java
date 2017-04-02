@@ -21,7 +21,6 @@ import android.content.Context;
 import android.graphics.Color;
 import android.util.Log;
 import android.view.MotionEvent;
-import android.view.Surface;
 
 import org.rajawali3d.Object3D;
 import org.rajawali3d.lights.DirectionalLight;
@@ -39,24 +38,23 @@ import java.util.Stack;
 
 import javax.microedition.khronos.opengles.GL10;
 
+import com.projecttango.tangosupport.TangoSupport;
+
 /**
- * Very simple example point to point renderer which displays a line fixed in place.
- * Whenever the user clicks on the screen, the line is re-rendered with an endpoint
+ * Very simple example point-to-point renderer which displays a line fixed in place.
+ * When the user clicks the screen, the line is re-rendered with an endpoint
  * placed at the point corresponding to the depth at the point of the click.
  */
 public class PointToPointRenderer extends Renderer {
     private static final String TAG = PointToPointRenderer.class.getSimpleName();
 
     private float[] textureCoords0 = new float[]{0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
-    private float[] textureCoords270 = new float[]{1.0F, 1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 0.0F};
-    private float[] textureCoords180 = new float[]{1.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
-    private float[] textureCoords90 = new float[]{0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F};
 
     private Object3D mLine;
     private Stack<Vector3> mPoints;
     private boolean mLineUpdated = false;
 
-    // Augmented reality related fields
+    // Augmented reality related fields.
     private ATexture mTangoCameraTexture;
     private boolean mSceneCameraConfigured;
     private ScreenQuad mBackgroundQuad;
@@ -76,7 +74,7 @@ public class PointToPointRenderer extends Renderer {
         Material tangoCameraMaterial = new Material();
         tangoCameraMaterial.setColorInfluence(0);
         // We need to use Rajawali's {@code StreamingTexture} since it sets up the texture
-        // for GL_TEXTURE_EXTERNAL_OES rendering
+        // for GL_TEXTURE_EXTERNAL_OES rendering.
         mTangoCameraTexture =
                 new StreamingTexture("camera", (StreamingTexture.ISurfaceListener) null);
         try {
@@ -96,8 +94,8 @@ public class PointToPointRenderer extends Renderer {
     }
 
     /**
-     * Update background texture's UV coordinates when device orientation is changed. i.e change
-     * between landscape and portrait mode.
+     * Update background texture's UV coordinates when device orientation is changed (i.e., change
+     * between landscape and portrait mode).
      * This must be run in the OpenGL thread.
      */
     public void updateColorCameraTextureUvGlThread(int rotation) {
@@ -105,26 +103,15 @@ public class PointToPointRenderer extends Renderer {
             mBackgroundQuad = new ScreenQuad();
         }
 
-        switch (rotation) {
-            case Surface.ROTATION_90:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords90, true);
-                break;
-            case Surface.ROTATION_180:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords180, true);
-                break;
-            case Surface.ROTATION_270:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords270, true);
-                break;
-            default:
-                mBackgroundQuad.getGeometry().setTextureCoords(textureCoords0, true);
-                break;
-        }
+        float[] textureCoords =
+                TangoSupport.getVideoOverlayUVBasedOnDisplayRotation(textureCoords0, rotation);
+        mBackgroundQuad.getGeometry().setTextureCoords(textureCoords, true);
         mBackgroundQuad.getGeometry().reload();
     }
 
     @Override
     protected void onRender(long elapsedRealTime, double deltaTime) {
-        // Update the AR object if necessary
+        // Update the AR object if necessary.
         // Synchronize against concurrent access with the setter below.
         synchronized (this) {
             if (mLineUpdated) {
@@ -155,16 +142,16 @@ public class PointToPointRenderer extends Renderer {
 
     /**
      * Update the scene camera based on the provided pose in Tango start of service frame.
-     * The camera pose should match the pose of the camera color at the time the last rendered RGB
-     * frame, which can be retrieved with this.getTimestamp();
+     * The camera pose should match the pose of the camera color at the time of the last rendered
+     * RGB frame, which can be retrieved with this.getTimestamp();
      * <p/>
-     * NOTE: This must be called from the OpenGL render thread - it is not thread safe.
+     * NOTE: This must be called from the OpenGL render thread; it is not thread safe.
      */
     public void updateRenderCameraPose(TangoPoseData cameraPose) {
         float[] rotation = cameraPose.getRotationAsFloats();
         float[] translation = cameraPose.getTranslationAsFloats();
         Quaternion quaternion = new Quaternion(rotation[3], rotation[0], rotation[1], rotation[2]);
-        // Conjugating the Quaternion is need because Rajawali uses left handed convention for
+        // Conjugating the Quaternion is needed because Rajawali uses left-handed convention for
         // quaternions.
         getCurrentCamera().setRotation(quaternion.conjugate());
         getCurrentCamera().setPosition(translation[0], translation[1], translation[2]);
@@ -173,7 +160,7 @@ public class PointToPointRenderer extends Renderer {
     /**
      * It returns the ID currently assigned to the texture where the Tango color camera contents
      * should be rendered.
-     * NOTE: This must be called from the OpenGL render thread - it is not thread safe.
+     * NOTE: This must be called from the OpenGL render thread; it is not thread safe.
      */
     public int getTextureId() {
         return mTangoCameraTexture == null ? -1 : mTangoCameraTexture.getTextureId();
@@ -194,7 +181,7 @@ public class PointToPointRenderer extends Renderer {
     }
 
     /**
-     * Sets the projection matrix for the scen camera to match the parameters of the color camera,
+     * Sets the projection matrix for the scene camera to match the parameters of the color camera,
      * provided by the {@code TangoCameraIntrinsics}.
      */
     public void setProjectionMatrix(float[] matrixFloats) {
